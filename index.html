@@ -1,0 +1,100 @@
+<html>
+    <head>
+        <title>AES</title>
+    </head>
+    <body>
+        <script type="text/javascript" src="https://cdn.rawgit.com/ricmoo/aes-js/e27b99df/index.js"></script>
+        <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/js-sha256/0.9.0/sha256.js"></script>
+
+        <script type="text/javascript">
+            const node = 'http://127.0.0.1:15031';
+            const tokenURL = '/TokenManagementServer/Balance';
+            // todo: how to load private key?
+            const PKEY = new Uint8Array([165, 221, 69, 224, 129, 12, 168, 62, 33, 241, 6, 62, 107, 240, 85, 189, 19, 84, 67, 152, 242, 128, 112, 28, 191, 218, 19, 70, 188, 243, 174, 100]);
+            const PKEY_HASH = new Uint8Array(sha256.create().update(PKEY).array());
+            const SEG_SZ = 16;
+            // todo: how to randomize IV?
+            var ENC_VEC = [ 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34,35, 36 ];
+
+            function padBytes(data) {
+                // message length should be multiple of segment size,
+                // so adding some extra zero bytes to the end of the message
+                let pad = 0;
+
+                if (data.length < SEG_SZ) {
+                    pad = SEG_SZ - data.length;
+                } else if (data.length > SEG_SZ && (data.length % SEG_SZ) > 0) {
+                    pad = SEG_SZ - (data.length % SEG_SZ);
+                }
+
+                for (var i=0; i < pad; i++){
+                    data.push(0);
+                }
+
+                return {'data': data, 'padding': pad};
+            }
+
+            function unpadBytes(data, padding) {
+                // remove extra padding from the end of the message
+                return data.slice(0, data.length-padding);
+            }
+
+            function applyVector(data) {
+                // add initial vector to the beginning of the message
+                return new Uint8Array(ENC_VEC.concat([...data]));
+            }
+
+            function encrypt(body) {
+                let aesCfb = new aesjs.ModeOfOperation.cfb(PKEY_HASH, ENC_VEC, SEG_SZ);
+
+                // convert string to bytes
+                let textBytes = [...aesjs.utils.utf8.toBytes(JSON.stringify(body))];
+                // pad body to fits msg % segment == 0
+                let padded = padBytes(textBytes);
+                // encrypt padded data
+                let encryptedBytes = aesCfb.encrypt(padded.data);
+                // remove meaningless padded bytes from the end of the message
+                let unpadded = unpadBytes(encryptedBytes, padded.padding);
+                // apply initial vector
+                return applyVector(unpadded);
+            }
+
+            function decrypt(body) {
+                // extract IV from message
+                let iv = new Uint8Array(body.slice(0, 16));
+                // init CFB with message's IV
+                let aesCfb = new aesjs.ModeOfOperation.cfb(PKEY_HASH, iv, SEG_SZ);
+                // pad body to fits msg % segment == 0
+                let padded = padBytes(body);
+                // decrypt padded message with the IV
+                let raw = aesCfb.decrypt(padded.data);
+                // remove extra padding, cut IV from the beginning
+                let unpadded = unpadBytes(raw.slice(16, raw.length), padded.padding);
+                // convert bytes to string
+                let plaintext = aesjs.utils.utf8.fromBytes(unpadded);
+                // parse string as JSON
+                return JSON.parse(plaintext);
+            }
+
+            let req = encrypt({test: 'message'});
+
+            fetch(node+tokenURL, {
+                mode:   'cors',
+                method: 'post',
+                // body should be in `Uint8Array`;
+                body:   req,
+            }).then(function(re){
+                return Promise.resolve(re);
+            }).then(function(data){
+                data.arrayBuffer().then(function(buffer) {
+                    buffer = new Uint8Array(buffer);
+                    let msg = decrypt([...buffer]);
+                    console.log(msg);
+                    document.getElementsByTagName('body')[0].append(JSON.stringify(msg));
+                })
+            }).catch(function(err){
+                console.warn(err);
+            });
+        </script>
+    </body>
+</html>

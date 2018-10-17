@@ -1,0 +1,5 @@
+PoC AES encryption implementation for SONM Node's REST API;
+
+Can be used directly from your web-browser.
+
+Many thanks to @3Hren for padding algorithm;
